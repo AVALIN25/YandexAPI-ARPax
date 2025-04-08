@@ -1,0 +1,2 @@
+### GET Hello
+GET https://localhost:5001/hello
