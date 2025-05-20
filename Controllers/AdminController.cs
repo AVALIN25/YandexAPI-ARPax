@@ -91,7 +91,7 @@ public class AdminController : ControllerBase
     });
   }
 
-  // 5) Удалить рейс — можно оставить как есть
+  // 5) Удалить рейс 
   [HttpDelete("flights/{id}")]
   public async Task<IActionResult> Delete(int id)
   {
@@ -99,7 +99,7 @@ public class AdminController : ControllerBase
     return Ok(new { removed });
   }
 
-  // 6) История правок — пока оставим как есть (можно сделать DTO, если нужно)
+  // 6) История правок 
   [HttpGet("flights/{id}/edits")]
   public async Task<IActionResult> History(int id)
   {

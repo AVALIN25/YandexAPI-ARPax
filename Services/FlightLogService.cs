@@ -1,8 +1,8 @@
 // Services/FlightLogService.cs
 using System;
 using System.Threading.Tasks;
-using FlightValidationService.Data;     // ваш неймспейс для AppDbContext
-using FlightValidationService.Models;  // неймспейс для модели CheckLog
+using FlightValidationService.Data;     
+using FlightValidationService.Models;  
 
 namespace FlightValidationService.Services;
 
@@ -18,7 +18,7 @@ public class FlightLogService : IFlightLogService
       UserId = userId,
       FlightNumber = flightNumber,
       Result = result,
-      Timestamp = DateTime.UtcNow   // у вашей модели свойство называется Timestamp
+      Timestamp = DateTime.UtcNow   
     };
     _db.CheckLogs.Add(log);
     await _db.SaveChangesAsync();
