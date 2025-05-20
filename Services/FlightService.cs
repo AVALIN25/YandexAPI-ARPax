@@ -56,18 +56,25 @@ namespace FlightValidationService.Services
       return fresh;
     }
 
-    // Возвращает один рейс по номеру и дате
+    // Возвращает один рейс по номеру и дате (НОРМАЛИЗАЦИЯ!)
     public Flight? Get(string flightNumber, DateTime date)
     {
+      var normalizedNumber = flightNumber.Replace(" ", "").ToUpper();
+      var reqDate = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc);
+
       return GetAll()
           .SingleOrDefault(f =>
-              f.FlightNumber.Equals(flightNumber, StringComparison.OrdinalIgnoreCase)
-              && f.DepartureDate.Date == date.Date);
+              f.FlightNumber == normalizedNumber &&
+              f.DepartureDate.Date == reqDate.Date // сравниваем только Date
+          );
     }
 
     // Добавление ручного рейса админом
     public async Task<Flight> AddAsync(Flight f, int adminId)
     {
+      f.FlightNumber = f.FlightNumber.Replace(" ", "").ToUpper();
+      f.DepartureDate = DateTime.SpecifyKind(f.DepartureDate.Date, DateTimeKind.Utc);
+
       if (string.IsNullOrEmpty(f.Status))
       {
         f.Status = FlightStatusConstants.OnTime;
@@ -88,6 +95,9 @@ namespace FlightValidationService.Services
     // Редактирование рейса админом
     public async Task<Flight?> UpdateAsync(int id, Flight updated, int adminId)
     {
+      updated.FlightNumber = updated.FlightNumber.Replace(" ", "").ToUpper();
+      updated.DepartureDate = DateTime.SpecifyKind(updated.DepartureDate.Date, DateTimeKind.Utc);
+
       var existing = await _db.Flights.FindAsync(id);
       if (existing == null) return null;
 
@@ -104,11 +114,10 @@ namespace FlightValidationService.Services
       };
       _db.ManualFlightEdits.Add(edit);
 
-      // Применяем изменения, гарантируя UTC-тип для даты
+      // Применяем изменения
       existing.Status = updated.Status;
-      existing.DepartureDate = DateTime.SpecifyKind(
-                                   updated.DepartureDate.Date,
-                                   DateTimeKind.Utc);
+      existing.FlightNumber = updated.FlightNumber;
+      existing.DepartureDate = updated.DepartureDate;
       existing.DepartureTime = updated.DepartureTime;
       existing.EditedByAdmin = true;
       existing.Source = "manual";
@@ -152,7 +161,7 @@ namespace FlightValidationService.Services
     private async Task<List<Flight>> FetchYandexAsync()
     {
       var client = _httpClientFactory.CreateClient();
-      var today = DateTime.Now.Date;
+      var today = DateTime.UtcNow.Date;
       var tomorrow = today.AddDays(1);
 
       var dates = new[] { today, tomorrow };
@@ -176,11 +185,10 @@ namespace FlightValidationService.Services
           if (thread?.Number == null || depStr == null) continue;
           if (!DateTimeOffset.TryParse(depStr, out var dto)) continue;
 
-          // Статус всегда on_time для новых рейсов из API
           result.Add(new Flight
           {
-            FlightNumber = thread.Number,
-            DepartureDate = DateTime.SpecifyKind(date, DateTimeKind.Utc),
+            FlightNumber = thread.Number.Replace(" ", "").ToUpper(),
+            DepartureDate = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc),
             DepartureTime = dto.UtcDateTime.TimeOfDay,
             Status = FlightStatusConstants.OnTime,
             Source = "external",
@@ -188,9 +196,7 @@ namespace FlightValidationService.Services
             LastUpdated = DateTime.UtcNow
           });
         }
-
       }
-
       return result;
     }
 
@@ -205,8 +211,8 @@ namespace FlightValidationService.Services
       {
         var exist = await _db.Flights
             .SingleOrDefaultAsync(x =>
-                x.FlightNumber == f.FlightNumber
-                && x.DepartureDate == f.DepartureDate);
+                x.FlightNumber == f.FlightNumber &&
+                x.DepartureDate == f.DepartureDate);
 
         if (exist == null)
         {

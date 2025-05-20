@@ -63,25 +63,20 @@ public class FlightController : ControllerBase
   [HttpGet("{flightNumber}")]
   public IActionResult GetOne(string flightNumber, [FromQuery] DateTime date)
   {
-    // Простая валидация формата номера рейса (только буквы и цифры):
+    // Валидация номера рейса (только буквы и цифры):
     if (!System.Text.RegularExpressions.Regex.IsMatch(flightNumber, "^[A-Z0-9]+$"))
       return BadRequest("Invalid flight number format");
 
-    // Конвертируем переданную локальную дату (Екб) в UTC для поиска
-    var localDate = date.Date;
-    var unspecified = DateTime.SpecifyKind(localDate, DateTimeKind.Unspecified);
-    var reqUtc = TimeZoneInfo.ConvertTimeToUtc(unspecified, EkbZone);
+    // Используем только .Date без конвертаций!
+    var searchDate = date.Date;
 
-    // Пытаемся найти рейс
-    var flight = _fs.Get(flightNumber, reqUtc);
+    var flight = _fs.Get(flightNumber, searchDate);
     if (flight == null)
       return NotFound();
 
-    // Собираем UTC DateTime из базы и конвертируем в Екб
     var rawUtc = DateTime.SpecifyKind(flight.DepartureDate.Date.Add(flight.DepartureTime), DateTimeKind.Utc);
     var ekbDt = TimeZoneInfo.ConvertTimeFromUtc(rawUtc, EkbZone);
 
-    // Возвращаем клиенту с локальными датой и временем
     return Ok(new
     {
       flight.Id,
@@ -95,19 +90,33 @@ public class FlightController : ControllerBase
     });
   }
 
-
   [Authorize(Policy = "WorkerOnly")]
   [HttpPost("check-access")]
   public async Task<IActionResult> Check([FromBody] CheckAccessRequest req)
   {
-    var rawLocal = req.DepartureDate.Date;
-    var utcReq = DateTime.SpecifyKind(rawLocal, DateTimeKind.Unspecified);
-    var reqUtc = TimeZoneInfo.ConvertTimeToUtc(utcReq, EkbZone);
+    var reqDate = req.DepartureDate.Date;
+    var flight = _fs.Get(req.FlightNumber, reqDate);
 
-    var exists = _fs.Get(req.FlightNumber, reqUtc) != null;
+    var allowed = false;
+
+    if (flight != null)
+    {
+      // Получаем UTC DateTime вылета
+      var flightUtc = flight.DepartureDate.Date.Add(flight.DepartureTime);
+
+      // Текущее время в UTC
+      var nowUtc = DateTime.UtcNow;
+
+      // Разница между временем вылета и сейчас
+      var hoursUntilDeparture = (flightUtc - nowUtc).TotalHours;
+
+      // Доступ только если меньше или равно 12 часов до вылета
+      allowed = hoursUntilDeparture <= 12 && hoursUntilDeparture >= 0;
+    }
+
     var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    await _log.LogAsync(userId, req.FlightNumber, allowed);
 
-    await _log.LogAsync(userId, req.FlightNumber, exists);
-    return Ok(new { allowed = exists });
+    return Ok(new { allowed });
   }
 }
