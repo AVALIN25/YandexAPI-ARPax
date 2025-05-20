@@ -7,6 +7,7 @@ using FlightValidationService.Data;
 using FlightValidationService.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using static FlightValidationService.Models.Flight;
 
 namespace FlightValidationService.Services
 {
@@ -67,6 +68,10 @@ namespace FlightValidationService.Services
     // Добавление ручного рейса админом
     public async Task<Flight> AddAsync(Flight f, int adminId)
     {
+      if (string.IsNullOrEmpty(f.Status))
+      {
+        f.Status = FlightStatusConstants.OnTime;
+      }
       f.Source = "manual";
       f.EditedByAdmin = true;
       f.LastUpdated = DateTime.UtcNow;
@@ -171,14 +176,13 @@ namespace FlightValidationService.Services
           if (thread?.Number == null || depStr == null) continue;
           if (!DateTimeOffset.TryParse(depStr, out var dto)) continue;
 
-          var status = item.Status ?? thread.Status ?? "unknown";
-
+          // Статус всегда on_time для новых рейсов из API
           result.Add(new Flight
           {
             FlightNumber = thread.Number,
             DepartureDate = DateTime.SpecifyKind(date, DateTimeKind.Utc),
             DepartureTime = dto.UtcDateTime.TimeOfDay,
-            Status = status,
+            Status = FlightStatusConstants.OnTime,
             Source = "external",
             EditedByAdmin = false,
             LastUpdated = DateTime.UtcNow
@@ -189,7 +193,6 @@ namespace FlightValidationService.Services
 
       return result;
     }
-
 
     // Планировщик вызывает этот метод каждые 10 минут
     public async Task RefreshCacheFromApiAsync()
@@ -211,7 +214,7 @@ namespace FlightValidationService.Services
         }
         else if (!exist.EditedByAdmin)
         {
-          exist.Status = f.Status;
+          exist.Status = f.Status; // f.Status всегда on_time
           exist.DepartureTime = f.DepartureTime;
           exist.LastUpdated = DateTime.UtcNow;
         }

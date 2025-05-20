@@ -19,5 +19,13 @@ namespace FlightValidationService.Models
     public DateTime LastUpdated { get; set; }
 
     public ICollection<ManualFlightEdit> Edits { get; set; } = new List<ManualFlightEdit>();
+
+    public static class FlightStatusConstants
+    {
+      public const string OnTime = "on_time";
+      public const string Delayed = "delayed";
+      public const string Cancelled = "cancelled";
+    }
+
   }
 }

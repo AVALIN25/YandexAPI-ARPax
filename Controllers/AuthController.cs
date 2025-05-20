@@ -56,5 +56,26 @@ public class AuthController : ControllerBase
 
     return Ok(new { token = new JwtSecurityTokenHandler().WriteToken(token) });
   }
+  [AllowAnonymous]
+  [HttpPost("register")]
+  public async Task<IActionResult> Register([FromBody] RegisterRequest req)
+  {
+    // Проверяем, не существует ли пользователь с таким логином
+    if (await _db.Users.AnyAsync(u => u.Username == req.Username))
+      return BadRequest("User already exists");
+
+    var user = new User
+    {
+      Username = req.Username,
+      PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
+      Role = req.Role
+    };
+
+    _db.Users.Add(user);
+    await _db.SaveChangesAsync();
+
+    return Ok(new { user.Id, user.Username, user.Role });
+  }
+
 }
 
