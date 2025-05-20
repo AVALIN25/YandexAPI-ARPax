@@ -1,28 +1,26 @@
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
+using System;
 
-[Table("manual_flight_edits")]
-public class ManualFlightEdit
+namespace FlightValidationService.Models
 {
-  [Key]
-  public int Id { get; set; }
+  public class ManualFlightEdit
+  {
+    public int Id { get; set; }
 
-  public int? FlightId { get; set; }
-  [ForeignKey("FlightId")]
-  public Flight? Flight { get; set; }
+    // На какой рейс было изменение
+    public int FlightId { get; set; }
+    public Flight Flight { get; set; } = null!;
 
-  public int? AdminId { get; set; }
-  [ForeignKey("AdminId")]
-  public User? Admin { get; set; }
+    // Кто правил
+    public int AdminId { get; set; }
+    public User Admin { get; set; } = null!;
 
-  [MaxLength(20)]
-  public string? OldStatus { get; set; }
+    // Старые и новые значения
+    public string OldStatus { get; set; } = null!;
+    public string NewStatus { get; set; } = null!;
+    public DateTime OldDeparture { get; set; }
+    public DateTime NewDeparture { get; set; }
 
-  [MaxLength(20)]
-  public string? NewStatus { get; set; }
-
-  public DateTime? OldDeparture { get; set; }
-  public DateTime? NewDeparture { get; set; }
-
-  public DateTime? Timestamp { get; set; }
+    // Когда
+    public DateTime Timestamp { get; set; }
+  }
 }

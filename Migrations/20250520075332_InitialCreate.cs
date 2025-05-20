@@ -19,11 +19,12 @@ namespace FlightValidationService.Migrations
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     FlightNumber = table.Column<string>(type: "text", nullable: false),
-                    DepartureTime = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    Status = table.Column<string>(type: "text", nullable: true),
-                    Source = table.Column<string>(type: "text", nullable: true),
-                    EditedByAdmin = table.Column<bool>(type: "boolean", nullable: true),
-                    LastUpdated = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                    DepartureDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    DepartureTime = table.Column<TimeSpan>(type: "interval", nullable: false),
+                    Status = table.Column<string>(type: "text", nullable: false),
+                    EditedByAdmin = table.Column<bool>(type: "boolean", nullable: false),
+                    Source = table.Column<string>(type: "text", nullable: false),
+                    LastUpdated = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -36,9 +37,9 @@ namespace FlightValidationService.Migrations
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    Username = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
-                    PasswordHash = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
-                    Role = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true)
+                    Username = table.Column<string>(type: "text", nullable: false),
+                    PasswordHash = table.Column<string>(type: "text", nullable: false),
+                    Role = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -51,10 +52,10 @@ namespace FlightValidationService.Migrations
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    UserId = table.Column<int>(type: "integer", nullable: true),
-                    FlightNumber = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true),
-                    Result = table.Column<bool>(type: "boolean", nullable: true),
-                    Timestamp = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    FlightNumber = table.Column<string>(type: "text", nullable: false),
+                    Result = table.Column<bool>(type: "boolean", nullable: false),
+                    Timestamp = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -63,7 +64,8 @@ namespace FlightValidationService.Migrations
                         name: "FK_check_log_users_UserId",
                         column: x => x.UserId,
                         principalTable: "users",
-                        principalColumn: "Id");
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -72,13 +74,13 @@ namespace FlightValidationService.Migrations
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    FlightId = table.Column<int>(type: "integer", nullable: true),
-                    AdminId = table.Column<int>(type: "integer", nullable: true),
-                    OldStatus = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true),
-                    NewStatus = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true),
-                    OldDeparture = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    NewDeparture = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    Timestamp = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                    FlightId = table.Column<int>(type: "integer", nullable: false),
+                    AdminId = table.Column<int>(type: "integer", nullable: false),
+                    OldStatus = table.Column<string>(type: "text", nullable: false),
+                    NewStatus = table.Column<string>(type: "text", nullable: false),
+                    OldDeparture = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    NewDeparture = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    Timestamp = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -87,18 +89,26 @@ namespace FlightValidationService.Migrations
                         name: "FK_manual_flight_edits_flights_FlightId",
                         column: x => x.FlightId,
                         principalTable: "flights",
-                        principalColumn: "Id");
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
                         name: "FK_manual_flight_edits_users_AdminId",
                         column: x => x.AdminId,
                         principalTable: "users",
-                        principalColumn: "Id");
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateIndex(
                 name: "IX_check_log_UserId",
                 table: "check_log",
                 column: "UserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_flights_FlightNumber_DepartureDate",
+                table: "flights",
+                columns: new[] { "FlightNumber", "DepartureDate" },
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_manual_flight_edits_AdminId",

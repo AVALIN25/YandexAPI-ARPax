@@ -1,52 +1,26 @@
-using FlightValidationService.Data;
-using FlightValidationService.Models;
+// Services/FlightLogService.cs
+using System;
+using System.Threading.Tasks;
+using FlightValidationService.Data;     // ваш неймспейс для AppDbContext
+using FlightValidationService.Models;  // неймспейс для модели CheckLog
 
-namespace FlightValidationService.Services
+namespace FlightValidationService.Services;
+
+public class FlightLogService : IFlightLogService
 {
-  public interface IFlightLogService
+  private readonly AppDbContext _db;
+  public FlightLogService(AppDbContext db) => _db = db;
+
+  public async Task LogAsync(int userId, string flightNumber, bool result)
   {
-    Task LogCheckAsync(int userId, string flightNumber, bool result);
-    Task LogManualEditAsync(int adminId, int flightId, string oldStatus, string newStatus, DateTime oldDeparture, DateTime newDeparture);
-  }
-
-  public class FlightLogService : IFlightLogService
-  {
-    private readonly AppDbContext _context;
-
-    public FlightLogService(AppDbContext context)
+    var log = new CheckLog
     {
-      _context = context;
-    }
-
-    public async Task LogCheckAsync(int userId, string flightNumber, bool result)
-    {
-      var log = new CheckLog
-      {
-        UserId = userId,
-        FlightNumber = flightNumber,
-        Result = result,
-        Timestamp = DateTime.UtcNow
-      };
-
-      _context.CheckLogs.Add(log);
-      await _context.SaveChangesAsync();
-    }
-
-    public async Task LogManualEditAsync(int adminId, int flightId, string oldStatus, string newStatus, DateTime oldDeparture, DateTime newDeparture)
-    {
-      var log = new ManualFlightEdit
-      {
-        AdminId = adminId,
-        FlightId = flightId,
-        OldStatus = oldStatus,
-        NewStatus = newStatus,
-        OldDeparture = oldDeparture,
-        NewDeparture = newDeparture,
-        Timestamp = DateTime.UtcNow
-      };
-
-      _context.ManualFlightEdits.Add(log);
-      await _context.SaveChangesAsync();
-    }
+      UserId = userId,
+      FlightNumber = flightNumber,
+      Result = result,
+      Timestamp = DateTime.UtcNow   // у вашей модели свойство называется Timestamp
+    };
+    _db.CheckLogs.Add(log);
+    await _db.SaveChangesAsync();
   }
 }

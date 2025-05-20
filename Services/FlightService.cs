@@ -1,5 +1,6 @@
-#nullable enable
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FlightValidationService.Data;
@@ -11,160 +12,218 @@ namespace FlightValidationService.Services
 {
   public class FlightService : IFlightService
   {
-    private readonly AppDbContext _context;
+    private const string CACHE_KEY = "FLIGHTS";
+    private const string KoltsovoCode = "s9600370";
+    private const string ApiKey = "48aeaffd-917a-4a69-a9f4-3a3991c0e4ac";
+
+    private readonly AppDbContext _db;
     private readonly IMemoryCache _cache;
     private readonly IHttpClientFactory _httpClientFactory;
-    private const string KoltsovoCode = "s9600370";
 
-    public FlightService(AppDbContext context, IMemoryCache cache, IHttpClientFactory httpClientFactory)
+    public FlightService(
+        AppDbContext db,
+        IMemoryCache cache,
+        IHttpClientFactory httpClientFactory)
     {
-      _context = context;
+      _db = db;
       _cache = cache;
       _httpClientFactory = httpClientFactory;
     }
 
-    private string GetCacheKey(string flightNumber, string departureTime)
-    {
-      if (flightNumber is null) throw new ArgumentNullException(nameof(flightNumber));
-      if (departureTime is null) throw new ArgumentNullException(nameof(departureTime));
-      return $"{flightNumber.Replace(" ", "").ToLower()}_{departureTime}";
-    }
-
+    // Загружает из БД в кэш при старте
     public async Task LoadCacheFromDatabaseAsync()
     {
-      var allFlights = await _context.Flights
-          .AsNoTracking()
-          .ToListAsync();
-
-      foreach (var f in allFlights)
-      {
-        var key = GetCacheKey(f.FlightNumber!, f.DepartureTime!);
-        _cache.Set(key, f, new MemoryCacheEntryOptions
-        {
-          AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
-        });
-      }
+      var all = await _db.Flights
+                         .AsNoTracking()
+                         .ToListAsync();
+      _cache.Set(CACHE_KEY, all);
     }
 
-    public async Task<Flight?> GetFlightFromCacheOrDbAsync(string flightNumber, string? departureTime = null)
+    // Возвращает все рейсы из кэша или БД
+    public IEnumerable<Flight> GetAll()
     {
-      if (flightNumber is null) throw new ArgumentNullException(nameof(flightNumber));
-
-      var normalized = flightNumber.Replace(" ", "").ToLower().Trim();
-      string key;
-      if (departureTime is null)
-      {
-        // если время не указано — используем только номер как ключ
-        key = normalized;
-      }
-      else
-      {
-        key = GetCacheKey(normalized, departureTime);
-      }
-
-      // пробуем взять из кэша (cached может быть null)
-      if (_cache.TryGetValue(key, out Flight? cached) && cached is not null)
+      if (_cache.TryGetValue<List<Flight>>(CACHE_KEY, out var cached) && cached is not null)
         return cached;
 
-      var flight = await _context.Flights
-          .AsNoTracking()
-          .FirstOrDefaultAsync(f =>
-              f.FlightNumber!.Replace(" ", "").ToLower() == normalized &&
-              (departureTime == null || f.DepartureTime == departureTime)
-          );
-
-      if (flight is not null)
+      var fresh = _db.Flights
+                     .AsNoTracking()
+                     .ToList();
+      _cache.Set(CACHE_KEY, fresh, new MemoryCacheEntryOptions
       {
-        // для записи кэша формируем ключ с временем
-        var cacheKey = GetCacheKey(normalized, flight.DepartureTime!);
-        _cache.Set(cacheKey, flight, new MemoryCacheEntryOptions
-        {
-          AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
-        });
-      }
-
-      return flight;
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
+      });
+      return fresh;
     }
 
-    public async Task UpdateFlightsAsync()
+    // Возвращает один рейс по номеру и дате
+    public Flight? Get(string flightNumber, DateTime date)
     {
-      Console.WriteLine("🔄 Начинаем обновление расписания...");
+      return GetAll()
+          .SingleOrDefault(f =>
+              f.FlightNumber.Equals(flightNumber, StringComparison.OrdinalIgnoreCase)
+              && f.DepartureDate.Date == date.Date);
+    }
 
-      var client = _httpClientFactory.CreateClient();
-      var date = DateTime.UtcNow.ToString("yyyy-MM-dd");
-      var url = $"https://api.rasp.yandex.net/v3.0/schedule/?station={KoltsovoCode}" +
-                $"&transport_types=plane&event=departure&date={date}&apikey=48aeaffd-917a-4a69-a9f4-3a3991c0e4ac";
+    // Добавление ручного рейса админом
+    public async Task<Flight> AddAsync(Flight f, int adminId)
+    {
+      f.Source = "manual";
+      f.EditedByAdmin = true;
+      f.LastUpdated = DateTime.UtcNow;
 
-      try
+      _db.Flights.Add(f);
+      await _db.SaveChangesAsync();
+
+      _cache.Remove(CACHE_KEY);
+      await LoadCacheFromDatabaseAsync();
+
+      return f;
+    }
+
+    // Редактирование рейса админом
+    public async Task<Flight?> UpdateAsync(int id, Flight updated, int adminId)
+    {
+      var existing = await _db.Flights.FindAsync(id);
+      if (existing == null) return null;
+
+      // Запись истории изменений
+      var edit = new ManualFlightEdit
       {
-        var response = await client.GetFromJsonAsync<YandexApiResponse>(url);
-        if (response?.Schedule is not { Count: > 0 })
+        FlightId = existing.Id,
+        AdminId = adminId,
+        OldStatus = existing.Status,
+        NewStatus = updated.Status,
+        OldDeparture = existing.DepartureDate.Date + existing.DepartureTime,
+        NewDeparture = updated.DepartureDate.Date + updated.DepartureTime,
+        Timestamp = DateTime.UtcNow
+      };
+      _db.ManualFlightEdits.Add(edit);
+
+      // Применяем изменения, гарантируя UTC-тип для даты
+      existing.Status = updated.Status;
+      existing.DepartureDate = DateTime.SpecifyKind(
+                                   updated.DepartureDate.Date,
+                                   DateTimeKind.Utc);
+      existing.DepartureTime = updated.DepartureTime;
+      existing.EditedByAdmin = true;
+      existing.Source = "manual";
+      existing.LastUpdated = DateTime.UtcNow;
+
+      await _db.SaveChangesAsync();
+
+      _cache.Remove(CACHE_KEY);
+      await LoadCacheFromDatabaseAsync();
+
+      return existing;
+    }
+
+    // Удаление рейса
+    public async Task<bool> DeleteAsync(int id)
+    {
+      var flight = await _db.Flights.FindAsync(id);
+      if (flight == null) return false;
+
+      _db.Flights.Remove(flight);
+      await _db.SaveChangesAsync();
+
+      _cache.Remove(CACHE_KEY);
+      await LoadCacheFromDatabaseAsync();
+
+      return true;
+    }
+
+    // История правок для конкретного рейса
+    public Task<IEnumerable<ManualFlightEdit>> GetEditHistoryAsync(int flightId)
+    {
+      var edits = _db.ManualFlightEdits
+          .Where(e => e.FlightId == flightId)
+          .Include(e => e.Admin)
+          .OrderByDescending(e => e.Timestamp)
+          .AsEnumerable();
+      return Task.FromResult(edits);
+    }
+
+    // Внутренний метод: дергает Яндекс и парсит ответ
+    private async Task<List<Flight>> FetchYandexAsync()
+    {
+      var client = _httpClientFactory.CreateClient();
+      var today = DateTime.Now.Date;
+      var tomorrow = today.AddDays(1);
+
+      var dates = new[] { today, tomorrow };
+      var result = new List<Flight>();
+
+      foreach (var date in dates)
+      {
+        var dateStr = date.ToString("yyyy-MM-dd");
+        var url = $"https://api.rasp.yandex.net/v3.0/schedule/"
+                    + $"?station={KoltsovoCode}"
+                    + "&transport_types=plane&event=departure"
+                    + $"&date={dateStr}&apikey={ApiKey}";
+
+        var resp = await client.GetFromJsonAsync<YandexApiResponse>(url);
+        if (resp?.Schedule == null) continue;
+
+        foreach (var item in resp.Schedule)
         {
-          Console.WriteLine("⚠️ Не удалось получить список рейсов или список пуст");
-          return;
-        }
+          var thread = item.Thread;
+          var depStr = item.Departure;
+          if (thread?.Number == null || depStr == null) continue;
+          if (!DateTimeOffset.TryParse(depStr, out var dto)) continue;
 
-        Console.WriteLine($"✅ Получено рейсов: {response.Schedule.Count}");
+          var status = item.Status ?? thread.Status ?? "unknown";
 
-        foreach (var item in response.Schedule)
-        {
-          if (item?.Thread?.Number is null || item.Departure is null)
+          result.Add(new Flight
           {
-            Console.WriteLine("❗ Пропущен сегмент: нет номера рейса или времени вылета");
-            continue;
-          }
-
-          if (!DateTimeOffset.TryParse(item.Departure, out var departureDto))
-          {
-            Console.WriteLine($"❗ Ошибка преобразования даты: {item.Departure}");
-            continue;
-          }
-
-          var departureTimeString = departureDto
-              .ToOffset(TimeSpan.FromHours(5))
-              .ToString("HH:mm");
-
-          var flight = new Flight
-          {
-            FlightNumber = item.Thread.Number!,
-            DepartureTime = departureTimeString,
-            Status = "on_time",
+            FlightNumber = thread.Number,
+            DepartureDate = DateTime.SpecifyKind(date, DateTimeKind.Utc),
+            DepartureTime = dto.UtcDateTime.TimeOfDay,
+            Status = status,
             Source = "external",
             EditedByAdmin = false,
             LastUpdated = DateTime.UtcNow
-          };
-
-          var existing = await _context.Flights.FirstOrDefaultAsync(f =>
-              f.FlightNumber == flight.FlightNumber &&
-              f.DepartureTime == flight.DepartureTime);
-
-          if (existing == null)
-          {
-            _context.Flights.Add(flight);
-            Console.WriteLine("➕ Добавлен новый рейс в базу");
-          }
-          else if (!existing.EditedByAdmin.GetValueOrDefault())
-          {
-            existing.Status = flight.Status;
-            existing.Source = flight.Source;
-            existing.LastUpdated = DateTime.UtcNow;
-            Console.WriteLine("♻️ Обновлён существующий рейс");
-          }
+          });
         }
 
-        await _context.SaveChangesAsync();
-        Console.WriteLine("✅ Сохранено в базу данных");
-
-        await LoadCacheFromDatabaseAsync();
       }
-      catch (Exception ex)
+
+      return result;
+    }
+
+
+    // Планировщик вызывает этот метод каждые 10 минут
+    public async Task RefreshCacheFromApiAsync()
+    {
+      var fresh = await FetchYandexAsync();
+      if (!fresh.Any()) return;
+
+      using var tx = await _db.Database.BeginTransactionAsync();
+      foreach (var f in fresh)
       {
-        Console.WriteLine("❌ Ошибка при получении данных из Яндекс API:");
-        Console.WriteLine(ex.Message);
+        var exist = await _db.Flights
+            .SingleOrDefaultAsync(x =>
+                x.FlightNumber == f.FlightNumber
+                && x.DepartureDate == f.DepartureDate);
+
+        if (exist == null)
+        {
+          _db.Flights.Add(f);
+        }
+        else if (!exist.EditedByAdmin)
+        {
+          exist.Status = f.Status;
+          exist.DepartureTime = f.DepartureTime;
+          exist.LastUpdated = DateTime.UtcNow;
+        }
       }
 
-      Console.WriteLine("⏱ Обновление завершено. Ждём следующего запуска...");
+      await _db.SaveChangesAsync();
+      await tx.CommitAsync();
+
+      _cache.Set(CACHE_KEY, fresh, new MemoryCacheEntryOptions
+      {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
+      });
     }
   }
 }
-#nullable restore

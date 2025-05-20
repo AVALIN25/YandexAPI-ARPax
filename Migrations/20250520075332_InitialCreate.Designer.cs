@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FlightValidationService.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20250513075156_AlterDepartureTimeToString")]
-    partial class AlterDepartureTimeToString
+    [Migration("20250520075332_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -25,7 +25,7 @@ namespace FlightValidationService.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("CheckLog", b =>
+            modelBuilder.Entity("FlightValidationService.Models.CheckLog", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -34,26 +34,26 @@ namespace FlightValidationService.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<string>("FlightNumber")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .IsRequired()
+                        .HasColumnType("text");
 
-                    b.Property<bool?>("Result")
+                    b.Property<bool>("Result")
                         .HasColumnType("boolean");
 
-                    b.Property<DateTime?>("Timestamp")
+                    b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int?>("UserId")
+                    b.Property<int>("UserId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("check_log");
+                    b.ToTable("check_log", (string)null);
                 });
 
-            modelBuilder.Entity("Flight", b =>
+            modelBuilder.Entity("FlightValidationService.Models.Flight", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -61,32 +61,39 @@ namespace FlightValidationService.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("DepartureTime")
-                        .IsRequired()
-                        .HasColumnType("varchar(5)");
+                    b.Property<DateTime>("DepartureDate")
+                        .HasColumnType("timestamp with time zone");
 
-                    b.Property<bool?>("EditedByAdmin")
+                    b.Property<TimeSpan>("DepartureTime")
+                        .HasColumnType("interval");
+
+                    b.Property<bool>("EditedByAdmin")
                         .HasColumnType("boolean");
 
                     b.Property<string>("FlightNumber")
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<DateTime?>("LastUpdated")
+                    b.Property<DateTime>("LastUpdated")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Source")
+                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Status")
+                        .IsRequired()
                         .HasColumnType("text");
 
                     b.HasKey("Id");
 
-                    b.ToTable("flights");
+                    b.HasIndex("FlightNumber", "DepartureDate")
+                        .IsUnique();
+
+                    b.ToTable("flights", (string)null);
                 });
 
-            modelBuilder.Entity("ManualFlightEdit", b =>
+            modelBuilder.Entity("FlightValidationService.Models.ManualFlightEdit", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -94,27 +101,27 @@ namespace FlightValidationService.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("AdminId")
+                    b.Property<int>("AdminId")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("FlightId")
+                    b.Property<int>("FlightId")
                         .HasColumnType("integer");
 
-                    b.Property<DateTime?>("NewDeparture")
+                    b.Property<DateTime>("NewDeparture")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("NewStatus")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .IsRequired()
+                        .HasColumnType("text");
 
-                    b.Property<DateTime?>("OldDeparture")
+                    b.Property<DateTime>("OldDeparture")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("OldStatus")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .IsRequired()
+                        .HasColumnType("text");
 
-                    b.Property<DateTime?>("Timestamp")
+                    b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
@@ -123,10 +130,10 @@ namespace FlightValidationService.Migrations
 
                     b.HasIndex("FlightId");
 
-                    b.ToTable("manual_flight_edits");
+                    b.ToTable("manual_flight_edits", (string)null);
                 });
 
-            modelBuilder.Entity("User", b =>
+            modelBuilder.Entity("FlightValidationService.Models.User", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -135,57 +142,55 @@ namespace FlightValidationService.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<string>("PasswordHash")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<string>("Role")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<string>("Username")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
-                    b.ToTable("users");
+                    b.ToTable("users", (string)null);
                 });
 
-            modelBuilder.Entity("CheckLog", b =>
+            modelBuilder.Entity("FlightValidationService.Models.CheckLog", b =>
                 {
-                    b.HasOne("User", "User")
-                        .WithMany("Checks")
-                        .HasForeignKey("UserId");
+                    b.HasOne("FlightValidationService.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("ManualFlightEdit", b =>
+            modelBuilder.Entity("FlightValidationService.Models.ManualFlightEdit", b =>
                 {
-                    b.HasOne("User", "Admin")
-                        .WithMany("AdminEdits")
-                        .HasForeignKey("AdminId");
+                    b.HasOne("FlightValidationService.Models.User", "Admin")
+                        .WithMany()
+                        .HasForeignKey("AdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
-                    b.HasOne("Flight", "Flight")
+                    b.HasOne("FlightValidationService.Models.Flight", "Flight")
                         .WithMany("Edits")
-                        .HasForeignKey("FlightId");
+                        .HasForeignKey("FlightId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Admin");
 
                     b.Navigation("Flight");
                 });
 
-            modelBuilder.Entity("Flight", b =>
+            modelBuilder.Entity("FlightValidationService.Models.Flight", b =>
                 {
                     b.Navigation("Edits");
-                });
-
-            modelBuilder.Entity("User", b =>
-                {
-                    b.Navigation("AdminEdits");
-
-                    b.Navigation("Checks");
                 });
 #pragma warning restore 612, 618
         }

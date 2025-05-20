@@ -1,122 +1,113 @@
-using Microsoft.AspNetCore.Mvc;
-using FlightValidationService.Data;
+using FlightValidationService.Models.Dto;
 using FlightValidationService.Models;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
-using System.Linq;
 using FlightValidationService.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
-namespace FlightValidationService.Controllers
+[ApiController]
+[Route("api/[controller]")]
+public class FlightController : ControllerBase
 {
-  [ApiController]
-  [Route("api/[controller]")]
-  public class FlightController : ControllerBase
+  private readonly IFlightService _fs;
+  private readonly IFlightLogService _log;
+  private static readonly TimeZoneInfo EkbZone =
+      TimeZoneInfo.FindSystemTimeZoneById("Asia/Yekaterinburg");
+
+  public FlightController(IFlightService fs, IFlightLogService log)
   {
-    private readonly AppDbContext _context;
-    private readonly IMemoryCache _cache;
+    _fs = fs ?? throw new ArgumentNullException(nameof(fs));
+    _log = log ?? throw new ArgumentNullException(nameof(log));
+  }
 
-    public FlightController(AppDbContext context, IMemoryCache cache)
+  [Authorize(Policy = "WorkerOnly")]
+  [HttpGet]
+  public IActionResult GetAll()
+  {
+    var flightsUtc = _fs.GetAll();
+
+    var flightsEkb = flightsUtc
+        .Select(f =>
+        {
+          var rawUtc = f.DepartureDate.Date.Add(f.DepartureTime);
+          var utc = DateTime.SpecifyKind(rawUtc, DateTimeKind.Utc);
+          var ekbDt = TimeZoneInfo.ConvertTimeFromUtc(utc, EkbZone);
+
+          return new
+          {
+            f.Id,
+            f.FlightNumber,
+            DepartureDate = ekbDt.Date,
+            DepartureTime = ekbDt.TimeOfDay,
+            f.Status,
+            f.EditedByAdmin,
+            f.Source,
+            f.LastUpdated
+          };
+        })
+        .ToList();
+
+    var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, EkbZone).Date;
+    var tomorrow = today.AddDays(1);
+
+    var todayList = flightsEkb.Where(f => f.DepartureDate == today).OrderBy(f => f.DepartureTime);
+    var tomorrowList = flightsEkb.Where(f => f.DepartureDate == tomorrow).OrderBy(f => f.DepartureTime);
+    var otherList = flightsEkb
+        .Where(f => f.DepartureDate != today && f.DepartureDate != tomorrow)
+        .OrderBy(f => f.DepartureDate).ThenBy(f => f.DepartureTime);
+
+    return Ok(todayList.Concat(tomorrowList).Concat(otherList));
+  }
+
+  [Authorize(Policy = "WorkerOnly")]
+  [HttpGet("{flightNumber}")]
+  public IActionResult GetOne(string flightNumber, [FromQuery] DateTime date)
+  {
+    // Простая валидация формата номера рейса (только буквы и цифры):
+    if (!System.Text.RegularExpressions.Regex.IsMatch(flightNumber, "^[A-Z0-9]+$"))
+      return BadRequest("Invalid flight number format");
+
+    // Конвертируем переданную локальную дату (Екб) в UTC для поиска
+    var localDate = date.Date;
+    var unspecified = DateTime.SpecifyKind(localDate, DateTimeKind.Unspecified);
+    var reqUtc = TimeZoneInfo.ConvertTimeToUtc(unspecified, EkbZone);
+
+    // Пытаемся найти рейс
+    var flight = _fs.Get(flightNumber, reqUtc);
+    if (flight == null)
+      return NotFound();
+
+    // Собираем UTC DateTime из базы и конвертируем в Екб
+    var rawUtc = DateTime.SpecifyKind(flight.DepartureDate.Date.Add(flight.DepartureTime), DateTimeKind.Utc);
+    var ekbDt = TimeZoneInfo.ConvertTimeFromUtc(rawUtc, EkbZone);
+
+    // Возвращаем клиенту с локальными датой и временем
+    return Ok(new
     {
-      _context = context;
-      _cache = cache;
-    }
-
-    [HttpGet]
-    public async Task<IActionResult> GetFlights()
-    {
-      var flights = await _context.Flights.ToListAsync();
-      return Ok(flights);
-    }
-
-
-    [HttpPost]
-    public async Task<IActionResult> CreateFlight([FromBody] Flight flight)
-    {
-      flight.Source = "manual";
-      flight.EditedByAdmin = true;
-      flight.LastUpdated = DateTime.UtcNow;
-
-      _context.Flights.Add(flight);
-      await _context.SaveChangesAsync();
-
-      return CreatedAtAction(nameof(GetByFlightNumber), new
-      {
-        flightNumber = flight.FlightNumber,
-        departureDate = flight.DepartureTime
-      }, flight);
-    }
-
-    [HttpPut("{id}")]
-    public async Task<IActionResult> UpdateFlight(int id, [FromBody] Flight updated)
-    {
-      var flight = await _context.Flights.FindAsync(id);
-      if (flight == null) return NotFound();
-
-      // Обновляем строковое поле DepartureTime ("HH:mm"), если передано новое значение
-      flight.DepartureTime = updated.DepartureTime ?? flight.DepartureTime;
-      flight.Status = updated.Status;
-      flight.Source = "manual";
-      flight.EditedByAdmin = true;
-      flight.LastUpdated = DateTime.UtcNow;
-
-      await _context.SaveChangesAsync();
-      return Ok(flight);
-    }
-
-    [HttpPost("check-access")]
-    public IActionResult CheckAccess([FromBody] AccessRequest request)
-    {
-      // Ищем рейс по номеру — все рейсы на нужную дату уже загружены
-      var flight = _context.Flights.FirstOrDefault(f =>
-          f.FlightNumber == request.FlightNumber);
+      flight.Id,
+      flight.FlightNumber,
+      DepartureDate = ekbDt.Date,
+      DepartureTime = ekbDt.TimeOfDay,
+      flight.Status,
+      flight.EditedByAdmin,
+      flight.Source,
+      flight.LastUpdated
+    });
+  }
 
 
-      if (flight == null)
-        return NotFound("Рейс не найден");
+  [Authorize(Policy = "WorkerOnly")]
+  [HttpPost("check-access")]
+  public async Task<IActionResult> Check([FromBody] CheckAccessRequest req)
+  {
+    var rawLocal = req.DepartureDate.Date;
+    var utcReq = DateTime.SpecifyKind(rawLocal, DateTimeKind.Unspecified);
+    var reqUtc = TimeZoneInfo.ConvertTimeToUtc(utcReq, EkbZone);
 
-      bool isAllowed = flight.Status == "on_time";
-      return Ok(new { allowed = isAllowed });
-    }
+    var exists = _fs.Get(req.FlightNumber, reqUtc) != null;
+    var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
-    // DELETE api/flight/clear
-    [HttpDelete("clear")]
-    public async Task<IActionResult> ClearDatabase()
-    {
-      // Удаляем все записи из таблицы Flights
-      _context.Flights.RemoveRange(_context.Flights);
-      await _context.SaveChangesAsync();
-      return Ok("База данных рейсов успешно очищена.");
-    }
-
-
-
-    // GET /api/flight/search?flightNumber={номер}
-    [HttpGet("search")]
-    public async Task<IActionResult> GetByFlightNumber(
-        [FromQuery] string flightNumber,
-        [FromServices] IFlightService flightService)
-    {
-      // Нормализуем номер
-      var normalized = flightNumber.Replace(" ", "").ToLower().Trim();
-
-      // Пытаемся найти в кэше или БД (через сервис)
-      var flight = await flightService.GetFlightFromCacheOrDbAsync(normalized, /*departureTime*/ null!);
-
-      // Если не найдено — грузим из Яндекса и повторяем поиск
-      if (flight == null)
-      {
-        await flightService.UpdateFlightsAsync();
-        flight = await flightService.GetFlightFromCacheOrDbAsync(normalized, null!);
-        if (flight == null)
-          return NotFound($"Рейс {flightNumber} не найден.");
-      }
-
-      return Ok(flight);
-    }
-
-
-
-
-
+    await _log.LogAsync(userId, req.FlightNumber, exists);
+    return Ok(new { allowed = exists });
   }
 }

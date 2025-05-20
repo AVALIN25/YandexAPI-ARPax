@@ -15,11 +15,17 @@ namespace FlightValidationService.Models
 
     [JsonPropertyName("thread")]
     public ThreadInfo? Thread { get; set; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; set; }
   }
 
   public class ThreadInfo
   {
     [JsonPropertyName("number")]
     public string? Number { get; set; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; set; }
   }
 }

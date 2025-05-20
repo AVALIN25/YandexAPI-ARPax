@@ -1,25 +1,23 @@
+using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
-[Table("flights")]
-public class Flight
+namespace FlightValidationService.Models
 {
-  [Key]
-  public int Id { get; set; }
 
-  [Required]
-  public string? FlightNumber { get; set; }
+  public class Flight
+  {
+    public int Id { get; set; }
+    public string FlightNumber { get; set; } = null!;
+    public DateTime DepartureDate { get; set; }
+    public TimeSpan DepartureTime { get; set; }
+    public string Status { get; set; } = null!;
+    public bool EditedByAdmin { get; set; }
+    public string Source { get; set; } = null!;         // "yandex" или "manual"
+    public DateTime LastUpdated { get; set; }
 
-  [Column(TypeName = "varchar(5)")]
-  public string DepartureTime { get; set; }
-
-  public string? Status { get; set; }
-
-  public string? Source { get; set; }
-
-  public bool? EditedByAdmin { get; set; }
-
-  public DateTime? LastUpdated { get; set; }
-
-  public ICollection<ManualFlightEdit>? Edits { get; set; }
+    public ICollection<ManualFlightEdit> Edits { get; set; } = new List<ManualFlightEdit>();
+  }
 }
