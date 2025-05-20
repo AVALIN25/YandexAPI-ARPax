@@ -63,13 +63,10 @@ public class FlightController : ControllerBase
   [HttpGet("{flightNumber}")]
   public IActionResult GetOne(string flightNumber, [FromQuery] DateTime date)
   {
-    // Валидация номера рейса (только буквы и цифры):
     if (!System.Text.RegularExpressions.Regex.IsMatch(flightNumber, "^[A-Z0-9]+$"))
       return BadRequest("Invalid flight number format");
 
-    // Используем только .Date без конвертаций!
     var searchDate = date.Date;
-
     var flight = _fs.Get(flightNumber, searchDate);
     if (flight == null)
       return NotFound();
@@ -91,32 +88,52 @@ public class FlightController : ControllerBase
   }
 
   [Authorize(Policy = "WorkerOnly")]
-  [HttpPost("check-access")]
-  public async Task<IActionResult> Check([FromBody] CheckAccessRequest req)
+  [HttpPost("validate-flight")]
+  public async Task<IActionResult> ValidateFlight([FromBody] CheckAccessRequest req)
   {
     var reqDate = req.DepartureDate.Date;
     var flight = _fs.Get(req.FlightNumber, reqDate);
 
-    var allowed = false;
-
-    if (flight != null)
+    if (flight == null)
     {
-      // Получаем UTC DateTime вылета
-      var flightUtc = flight.DepartureDate.Date.Add(flight.DepartureTime);
-
-      // Текущее время в UTC
-      var nowUtc = DateTime.UtcNow;
-
-      // Разница между временем вылета и сейчас
-      var hoursUntilDeparture = (flightUtc - nowUtc).TotalHours;
-
-      // Доступ только если меньше или равно 12 часов до вылета
-      allowed = hoursUntilDeparture <= 12 && hoursUntilDeparture >= 0;
+      // Логируем неудачную попытку (по желанию)
+      var userIdNF = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+      await _log.LogAsync(userIdNF, req.FlightNumber, false);
+      return NotFound(new
+      {
+        allowed = false,
+        reason = "Рейс не найден"
+      });
     }
+
+    var flightUtc = flight.DepartureDate.Date.Add(flight.DepartureTime);
+    var nowUtc = DateTime.UtcNow;
+    var hoursUntilDeparture = (flightUtc - nowUtc).TotalHours;
+    var allowed = hoursUntilDeparture <= 12 && hoursUntilDeparture >= 0;
 
     var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
     await _log.LogAsync(userId, req.FlightNumber, allowed);
 
-    return Ok(new { allowed });
+    return Ok(new
+    {
+      allowed,
+      reason = allowed
+            ? "Доступ разрешён"
+            : (hoursUntilDeparture < 0
+                ? "Рейс уже отправлен"
+                : "До вылета больше 12 часов"),
+      flight = new
+      {
+        flight.Id,
+        flight.FlightNumber,
+        flight.DepartureDate,
+        flight.DepartureTime,
+        flight.Status,
+        flight.EditedByAdmin,
+        flight.Source,
+        flight.LastUpdated
+      },
+      hoursUntilDeparture = Math.Round(hoursUntilDeparture, 2)
+    });
   }
 }
